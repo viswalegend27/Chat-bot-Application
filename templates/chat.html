@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Chatbot</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.6.0/styles/default.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+    <style>
+        .chat-container {
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #dee2e6;
+            border-radius: 0.375rem;
+            padding: 1rem;
+            background-color: #f8f9fa;
+        }
+        
+        .message {
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+        }
+        
+        .user-message {
+            background-color: #007bff;
+            color: white;
+            margin-left: 2rem;
+            text-align: right;
+        }
+        
+        .bot-message {
+            background-color: #ffffff;
+            color: #333;
+            margin-right: 2rem;
+            border: 1px solid #e9ecef;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .bot-message h1, .bot-message h2, .bot-message h3, 
+        .bot-message h4, .bot-message h5, .bot-message h6 {
+            margin-top: 0.5rem;
+            margin-bottom: 0.5rem;
+            color: #2c3e50;
+        }
+        
+        .bot-message ul, .bot-message ol {
+            margin: 0.5rem 0;
+            padding-left: 1.5rem;
+        }
+        
+        .bot-message li {
+            margin-bottom: 0.25rem;
+        }
+        
+        .bot-message p {
+            margin-bottom: 0.5rem;
+        }
+        
+        .bot-message strong {
+            color: #2c3e50;
+        }
+        
+        .mode-indicator {
+            background: linear-gradient(45deg, #007bff, #28a745);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.25rem;
+            font-weight: bold;
+            display: inline-block;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 1rem;
+            font-style: italic;
+            color: #6c757d;
+        }
+        
+        .typing-indicator {
+            display: inline-block;
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-8 mx-auto">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h3 class="mb-0">AI Chatbot</h3>
+                        <div class="d-flex align-items-center gap-3">
+                            <span class="mode-indicator">
+                                {% if rag_on %}📚 Document Q&A{% else %}💬 General Chat{% endif %}
+                            </span>
+                            <span class="text-muted">{{ email }}</span>
+                            <a href="{{ url_for('logout') }}" class="btn btn-outline-secondary btn-sm">Logout</a>
+                        </div>
+                    </div>
+                    
+                    <div class="card-body">
+                        <!-- Mode Toggle -->
+                        <div class="mb-3">
+                            <form method="post" action="{{ url_for('set_mode') }}" class="d-flex gap-2">
+                                <button type="submit" name="mode" value="chat" 
+                                        class="btn {% if not rag_on %}btn-primary{% else %}btn-outline-primary{% endif %} btn-sm">
+                                    💬 General Chat
+                                </button>
+                                <button type="submit" name="mode" value="rag" 
+                                        class="btn {% if rag_on %}btn-success{% else %}btn-outline-success{% endif %} btn-sm">
+                                    📚 Document Q&A
+                                </button>
+                            </form>
+                        </div>
+                        
+                        <!-- File Upload (RAG mode only) -->
+                        {% if rag_on %}
+                        <div class="mb-3">
+                            <form method="post" action="{{ url_for('upload') }}" enctype="multipart/form-data" class="d-flex gap-2">
+                                <input type="file" name="file" class="form-control" accept=".pdf,.docx,.txt">
+                                <button type="submit" class="btn btn-success">📄 Upload</button>
+                            </form>
+                            <small class="text-muted">Supported: PDF, DOCX, TXT files</small>
+                        </div>
+                        {% endif %}
+                        
+                        <!-- Flash Messages -->
+                        {% with messages = get_flashed_messages() %}
+                            {% if messages %}
+                                {% for message in messages %}
+                                    <div class="alert alert-info alert-dismissible fade show" role="alert">
+                                        {{ message }}
+                                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                                    </div>
+                                {% endfor %}
+                            {% endif %}
+                        {% endwith %}
+                        
+                        <!-- Chat Messages -->
+                        <div class="chat-container" id="chatContainer">
+                            {% for message in messages %}
+                                <div class="message {% if message.sender == 'user' %}user-message{% else %}bot-message{% endif %}">
+                                    {% if message.sender == 'user' %}
+                                        <strong>You:</strong> {{ message.text }}
+                                    {% else %}
+                                        <strong>AI:</strong> 
+                                        <div class="bot-response" data-content="{{ message.text }}"></div>
+                                    {% endif %}
+                                </div>
+                            {% endfor %}
+                        </div>
+                        
+                        <!-- Loading Indicator -->
+                        <div class="loading" id="loadingIndicator">
+                            <span class="typing-indicator">🤖 AI is thinking...</span>
+                        </div>
+                        
+                        <!-- Message Input -->
+                        <form id="chatForm" class="mt-3">
+                            <div class="input-group">
+                                <input type="text" id="messageInput" class="form-control" 
+                                       placeholder="Type your message..." required>
+                                <button type="submit" class="btn btn-primary">Send 📤</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Function to render markdown content
+        function renderMarkdown(content) {
+            // Configure marked options for better formatting
+            marked.setOptions({
+                breaks: true,
+                gfm: true
+            });
+            return marked.parse(content);
+        }
+        
+        // Render existing bot messages
+        document.addEventListener('DOMContentLoaded', function() {
+            const botResponses = document.querySelectorAll('.bot-response');
+            botResponses.forEach(function(element) {
+                const content = element.getAttribute('data-content');
+                element.innerHTML = renderMarkdown(content);
+            });
+            scrollToBottom();
+        });
+        
+        // Handle form submission
+        document.getElementById('chatForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const messageInput = document.getElementById('messageInput');
+            const message = messageInput.value.trim();
+            
+            if (!message) return;
+            
+            // Add user message to chat
+            addMessage('user', message);
+            messageInput.value = '';
+            
+            // Show loading indicator
+            document.getElementById('loadingIndicator').style.display = 'block';
+            scrollToBottom();
+            
+            // Send message to server
+            fetch('{{ url_for("chat") }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'message=' + encodeURIComponent(message)
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Hide loading indicator
+                document.getElementById('loadingIndicator').style.display = 'none';
+                
+                if (data.reply) {
+                    addMessage('bot', data.reply);
+                } else if (data.error) {
+                    addMessage('bot', '⚠️ ' + data.error);
+                }
+                scrollToBottom();
+            })
+            .catch(error => {
+                // Hide loading indicator
+                document.getElementById('loadingIndicator').style.display = 'none';
+                console.error('Error:', error);
+                addMessage('bot', '⚠️ Sorry, something went wrong. Please try again.');
+                scrollToBottom();
+            });
+        });
+        
+        function addMessage(sender, text) {
+            const chatContainer = document.getElementById('chatContainer');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${sender}-message`;
+            
+            if (sender === 'user') {
+                messageDiv.innerHTML = `<strong>You:</strong> ${escapeHtml(text)}`;
+            } else {
+                messageDiv.innerHTML = `<strong>AI:</strong> <div class="bot-response">${renderMarkdown(text)}</div>`;
+            }
+            
+            chatContainer.appendChild(messageDiv);
+        }
+        
+        function scrollToBottom() {
+            const chatContainer = document.getElementById('chatContainer');
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+        
+        function escapeHtml(unsafe) {
+            return unsafe
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+        
+        // Auto-focus on message input
+        document.getElementById('messageInput').focus();
+    </script>
+</body>
+</html>
