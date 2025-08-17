@@ -1,26 +1,31 @@
-import os, requests, numpy as np, fitz, docx, re, markdown
+import os, requests, numpy as np, fitz, docx, re
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 
-# ---------- CONFIG ----------
+# Config
 load_dotenv()
-BASE, UPLOADS = os.path.abspath(os.path.dirname(__file__)), "uploads"
-UPLOAD_FOLDER = os.path.join(BASE, UPLOADS); os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-FIREBASE_KEY, GEMINI_KEY = os.getenv("FIREBASE_API_KEY"), os.getenv("GOOGLE_API_KEY")
-ALLOWED_EXT, CHUNK_SIZE, TOP_K = {"pdf", "docx", "txt"}, 800, 3
+BASE = os.path.abspath(os.path.dirname(__file__))
+UPLOAD_FOLDER = os.path.join(BASE, "uploads")
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-key-123")
-app.config.update(
-    SQLALCHEMY_DATABASE_URI="sqlite:///" + os.path.join(BASE, "chatbot.db"),
-    SQLALCHEMY_TRACK_MODIFICATIONS=False, 
-    UPLOAD_FOLDER=UPLOAD_FOLDER
-)
+app.config.update({
+    "SQLALCHEMY_DATABASE_URI": "sqlite:///" + os.path.join(BASE, "chatbot.db"),
+    "SQLALCHEMY_TRACK_MODIFICATIONS": False,
+    "UPLOAD_FOLDER": UPLOAD_FOLDER
+})
 db = SQLAlchemy(app)
 
-# ---------- MODELS ----------
+FIREBASE_KEY = os.getenv("FIREBASE_API_KEY")
+GEMINI_KEY = os.getenv("GOOGLE_API_KEY")
+ALLOWED_EXT = {"pdf", "docx", "txt"}
+CHUNK_SIZE = 800
+TOP_K = 3
+
+# Models
 class Message(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_uid = db.Column(db.String(200))
@@ -39,7 +44,7 @@ class Embedding(db.Model):
     chunk = db.Column(db.Text)
     vector = db.Column(db.PickleType)
 
-# ---------- HELPERS ----------
+# Helper Functions
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT
 
@@ -58,35 +63,20 @@ def extract_text(filepath):
             with open(filepath, encoding="utf-8") as f:
                 return f.read()
     except Exception as e:
-        print(f"⚠️ Extract error: {e}")
+        print(f"Extract error: {e}")
     return ""
 
 def clean_ai_response(response_text):
-    """Clean and format AI response for better presentation"""
     if not response_text:
         return response_text
     
-    # Remove extra whitespace and normalize line breaks
     text = re.sub(r'\n\s*\n\s*\n', '\n\n', response_text.strip())
-    
-    # Fix markdown-like formatting
-    # Convert **text** to proper bold
     text = re.sub(r'\*\*([^*]+)\*\*', r'**\1**', text)
-    
-    # Fix bullet points - convert ***text:** to proper format
     text = re.sub(r'\*\*\*([^*:]+):\*\*', r'**\1:**', text)
-    
-    # Clean up multiple asterisks and inconsistent formatting
-    text = re.sub(r'\*{3,}', '**', text)  # Replace 3+ asterisks with 2
-    text = re.sub(r'(?<!\*)\*(?!\*)', '', text)  # Remove single asterisks
-    
-    # Ensure proper spacing after bullet points
+    text = re.sub(r'\*{3,}', '**', text)
+    text = re.sub(r'(?<!\*)\*(?!\*)', '', text)
     text = re.sub(r'\*\*([^*:]+):\*\*([^\n])', r'**\1:** \2', text)
-    
-    # Clean up spacing around colons
     text = re.sub(r':\s*([A-Z])', r': \1', text)
-    
-    # Remove excessive whitespace
     text = re.sub(r' +', ' ', text)
     
     return text.strip()
@@ -105,7 +95,6 @@ def firebase_auth(endpoint, email, password):
 
 def ask_gemini(text):
     try:
-        # Add instruction for cleaner formatting
         formatted_prompt = f"""Please provide a clean, well-formatted response to the following question. 
 Use proper markdown formatting with clear headings and bullet points where appropriate.
 
@@ -119,13 +108,11 @@ Question: {text}"""
         )
         data = response.json()
         raw_response = data["candidates"][0]["content"]["parts"][0]["text"]
-        
-        # Clean the response before returning
         return clean_ai_response(raw_response)
         
     except Exception as e:
         print(f"Gemini error: {e}")
-        return "⚠️ Sorry, I couldn't process your request right now."
+        return "Sorry, I couldn't process your request right now."
 
 def get_embedding(text):
     try:
@@ -165,16 +152,59 @@ def search_similar(query, user_uid):
         similarity = np.dot(query_embedding, vector) / (query_norm * vector_norm)
         scored_chunks.append((similarity, embedding.chunk))
     
-    # Return top K most similar chunks
     scored_chunks.sort(key=lambda x: x[0], reverse=True)
     return [chunk for _, chunk in scored_chunks[:TOP_K]]
 
-# ---------- ROUTES ----------
+# Routes
 @app.route("/")
 def home():
-    if "user_uid" in session:
-        return redirect(url_for("chat"))
-    return redirect(url_for("login"))
+    return redirect(url_for("chat" if "user_uid" in session else "login"))
+
+@app.route("/documents")
+def documents():
+    if "user_uid" not in session:
+        return redirect(url_for("login"))
+    
+    user_docs = Document.query.filter_by(user_uid=session["user_uid"]).all()
+    docs_with_chunks = []
+    
+    for doc in user_docs:
+        chunk_count = Embedding.query.filter_by(doc_id=doc.id).count()
+        docs_with_chunks.append({
+            'id': doc.id,
+            'filename': doc.filename,
+            'chunk_count': chunk_count,
+            'content_preview': doc.content[:200] + "..." if len(doc.content) > 200 else doc.content
+        })
+    
+    return jsonify({"documents": docs_with_chunks})
+
+@app.route("/delete_document/<int:doc_id>", methods=["POST"])
+def delete_document(doc_id):
+    if "user_uid" not in session:
+        return jsonify({"error": "Not authenticated"}), 401
+    
+    doc = Document.query.filter_by(id=doc_id, user_uid=session["user_uid"]).first()
+    if not doc:
+        return jsonify({"error": "Document not found"}), 404
+    
+    # Delete associated embeddings
+    Embedding.query.filter_by(doc_id=doc_id).delete()
+    # Delete document
+    db.session.delete(doc)
+    db.session.commit()
+    
+    return jsonify({"success": True})
+
+@app.route("/clear_history", methods=["POST"])
+def clear_history():
+    if "user_uid" not in session:
+        return redirect(url_for("login"))
+    
+    Message.query.filter_by(user_uid=session["user_uid"]).delete()
+    db.session.commit()
+    flash("Chat history cleared successfully!")
+    return redirect(url_for("chat"))
 
 @app.route("/signup", methods=["GET", "POST"])
 def signup():
@@ -220,19 +250,17 @@ def upload():
     
     file = request.files.get("file")
     if not file or not allowed_file(file.filename):
-        flash("⚠️ Please select a valid file (PDF, DOCX, or TXT)")
+        flash("Please select a valid file (PDF, DOCX, or TXT)")
         return redirect(url_for("chat"))
     
-    # Save file
     filename = secure_filename(file.filename)
     filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
     file.save(filepath)
     
-    # Extract text and create document
     text = extract_text(filepath)
     if not text.strip():
-        flash("⚠️ Could not extract text from the file")
-        os.remove(filepath)  # Clean up
+        flash("Could not extract text from the file")
+        os.remove(filepath)
         return redirect(url_for("chat"))
     
     user_uid = session["user_uid"]
@@ -240,11 +268,10 @@ def upload():
     db.session.add(doc)
     db.session.flush()
     
-    # Create embeddings for chunks
     chunks = chunk_text(text)
     success_count = 0
     for chunk in chunks:
-        if chunk.strip():  # Only process non-empty chunks
+        if chunk.strip():
             vector = get_embedding(chunk)
             if vector is not None and vector.size > 0:
                 embedding = Embedding(doc_id=doc.id, chunk=chunk, vector=vector)
@@ -252,12 +279,12 @@ def upload():
                 success_count += 1
     
     db.session.commit()
-    os.remove(filepath)  # Clean up uploaded file
+    os.remove(filepath)
     
     if success_count > 0:
-        flash(f"✅ Document uploaded successfully! Created {success_count} searchable chunks.")
+        flash(f"Document uploaded successfully! Created {success_count} searchable chunks.")
     else:
-        flash("⚠️ Document uploaded but no embeddings could be created.")
+        flash("Document uploaded but no embeddings could be created.")
     
     return redirect(url_for("chat"))
 
@@ -270,37 +297,31 @@ def chat():
     mode = session.get("mode", "chat")
     
     if request.method == "POST":
-        # Handle AJAX requests
-        if request.is_json or request.headers.get('Content-Type') == 'application/x-www-form-urlencoded':
-            user_message = request.form.get("message", "").strip()
-            if not user_message:
-                return jsonify({"error": "Empty message"}), 400
-            
-            # Save user message
-            user_msg_obj = Message(user_uid=user_uid, text=user_message, sender="user")
-            db.session.add(user_msg_obj)
-            
-            # Generate response based on mode
-            if mode == "rag":
-                context_chunks = search_similar(user_message, user_uid)
-                if context_chunks:
-                    context = "\n\n".join(context_chunks)
-                    prompt = f"Based on the following context, answer the question. If the context doesn't contain relevant information, say so.\n\nContext:\n{context}\n\nQuestion: {user_message}"
-                else:
-                    prompt = f"I don't have any relevant documents uploaded to answer this question: {user_message}\n\nPlease upload some documents first to use Document Q&A mode."
+        user_message = request.form.get("message", "").strip()
+        if not user_message:
+            return jsonify({"error": "Empty message"}), 400
+        
+        user_msg_obj = Message(user_uid=user_uid, text=user_message, sender="user")
+        db.session.add(user_msg_obj)
+        
+        if mode == "rag":
+            context_chunks = search_similar(user_message, user_uid)
+            if context_chunks:
+                context = "\n\n".join(context_chunks)
+                prompt = f"Based on the following context, answer the question. If the context doesn't contain relevant information, say so.\n\nContext:\n{context}\n\nQuestion: {user_message}"
             else:
-                prompt = user_message
-            
-            bot_reply = ask_gemini(prompt)
-            
-            # Save bot response
-            bot_msg_obj = Message(user_uid=user_uid, text=bot_reply, sender="bot")
-            db.session.add(bot_msg_obj)
-            db.session.commit()
-            
-            return jsonify({"reply": bot_reply})
+                prompt = f"I don't have any relevant documents uploaded to answer this question: {user_message}\n\nPlease upload some documents first to use Document Q&A mode."
+        else:
+            prompt = user_message
+        
+        bot_reply = ask_gemini(prompt)
+        
+        bot_msg_obj = Message(user_uid=user_uid, text=bot_reply, sender="bot")
+        db.session.add(bot_msg_obj)
+        db.session.commit()
+        
+        return jsonify({"reply": bot_reply})
     
-    # GET request - render chat page
     messages = Message.query.filter_by(user_uid=user_uid).all()
     return render_template("chat.html", 
                         messages=messages, 
@@ -314,10 +335,8 @@ def set_mode():
         session["mode"] = mode
     return redirect(url_for("chat"))
 
-# ---------- INIT ----------
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
-
-    port = int(os.environ.get("PORT", 5000))  # Render sets PORT env variable
+    port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
