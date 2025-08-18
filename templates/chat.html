@@ -125,6 +125,7 @@
                                 <ul class="dropdown-menu">
                                     <li><a class="dropdown-item" href="#" onclick="viewDocuments()">📄 View Documents</a></li>
                                     <li><a class="dropdown-item" href="#" onclick="clearHistory()">🗑️ Clear History</a></li>
+                                    <li><a class="dropdown-item text-danger" href="#" onclick="clearDocuments()">🗑️ Clear Documents</a></li>
                                     <li><hr class="dropdown-divider"></li>
                                     <li><a class="dropdown-item" href="{{ url_for('logout') }}">Logout</a></li>
                                 </ul>
@@ -240,6 +241,26 @@
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <form method="post" action="{{ url_for('clear_history') }}" style="display: inline;">
                         <button type="submit" class="btn btn-danger">Clear History</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Clear Documents Confirmation Modal -->
+    <div class="modal fade" id="clearDocumentsModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">🗑️ Clear Document History</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to delete <strong>all uploaded documents</strong>? This action cannot be undone.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <form method="post" action="{{ url_for('clear_documents') }}" style="display: inline;">
+                        <button type="submit" class="btn btn-danger">Clear Documents</button>
                     </form>
                 </div>
             </div>
@@ -407,7 +428,10 @@
             const modal = new bootstrap.Modal(document.getElementById('clearHistoryModal'));
             modal.show();
         }
-        
+        function clearDocuments() {
+        const modal = new bootstrap.Modal(document.getElementById('clearDocumentsModal'));
+        modal.show();
+        }
         // Auto-focus on message input
         document.getElementById('messageInput').focus();
     </script>

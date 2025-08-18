@@ -206,6 +206,24 @@ def clear_history():
     flash("Chat history cleared successfully!")
     return redirect(url_for("chat"))
 
+
+@app.route("/clear_documents", methods=["POST"])
+def clear_documents():
+    if "user_uid" not in session:
+        return redirect(url_for("login"))
+    
+    user_uid = session["user_uid"]
+    docs = Document.query.filter_by(user_uid=user_uid).all()
+    doc_ids = [doc.id for doc in docs]
+    
+    # Delete all embeddings for user's documents
+    Embedding.query.filter(Embedding.doc_id.in_(doc_ids)).delete(synchronize_session=False)
+    # Delete all documents for user
+    Document.query.filter_by(user_uid=user_uid).delete()
+    db.session.commit()
+    flash("All document history deleted successfully!")
+    return redirect(url_for("chat"))
+
 @app.route("/signup", methods=["GET", "POST"])
 def signup():
     if request.method == "POST":
