@@ -69,7 +69,6 @@ def extract_text(filepath):
 def clean_ai_response(response_text):
     if not response_text:
         return response_text
-    
     text = re.sub(r'\n\s*\n\s*\n', '\n\n', response_text.strip())
     text = re.sub(r'\*\*([^*]+)\*\*', r'**\1**', text)
     text = re.sub(r'\*\*\*([^*:]+):\*\*', r'**\1:**', text)
@@ -205,7 +204,6 @@ def clear_history():
     db.session.commit()
     flash("Chat history cleared successfully!")
     return redirect(url_for("chat"))
-
 
 @app.route("/clear_documents", methods=["POST"])
 def clear_documents():
