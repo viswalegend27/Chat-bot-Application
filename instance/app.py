@@ -91,7 +91,7 @@ def firebase_auth(endpoint, email, password):
     except Exception as e:
         print(f"Firebase auth error: {e}")
         return {"error": {"message": "Authentication failed"}}
-
+# Gemini response
 def ask_gemini(text):
     try:
         formatted_prompt = f"""Please provide a clean, well-formatted response to the following question. 
@@ -112,6 +112,7 @@ Question: {text}"""
     except Exception as e:
         print(f"Gemini error: {e}")
         return "Sorry, I couldn't process your request right now."
+# embedding
 
 def get_embedding(text):
     try:
@@ -127,6 +128,7 @@ def get_embedding(text):
         print(f"Embedding error: {e}")
         return None
 
+# search similer
 def search_similar(query, user_uid):
     query_embedding = get_embedding(query)
     if query_embedding is None or not query_embedding.size:
@@ -304,6 +306,7 @@ def upload():
     
     return redirect(url_for("chat"))
 
+# Chat function
 @app.route("/chat", methods=["GET", "POST"])
 def chat():
     if "user_uid" not in session:

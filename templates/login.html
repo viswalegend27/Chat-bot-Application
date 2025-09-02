@@ -3,22 +3,21 @@
 <div class="auth-container">
     <h2>Login to AI Chatbot</h2>
     
-    {% with messages = get_flashed_messages() %}
-        {% if messages %}
-            {% for message in messages %}
-                <div class="flash-message">{{ message }}</div>
-            {% endfor %}
-        {% endif %}
-    {% endwith %}
+    {% if messages %}
+        {% for message in messages %}
+            <div class="flash-message">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
     
     <form method="POST" class="auth-form">
+        {% csrf_token %}
         <input type="email" name="email" placeholder="Email" required>
         <input type="password" name="password" placeholder="Password" required>
         <button type="submit">Login</button>
     </form>
     
     <div class="auth-links">
-        <p>Don't have an account? <a href="{{ url_for('signup') }}">Sign up here</a></p>
+        <p>Don't have an account? <a href="{% url 'signup' %}">Sign up here</a></p>
     </div>
 </div>
 {% endblock %}
