@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: chatbot-app
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn chatbot_project.wsgi:application --bind 0.0.0.0:$PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.4
+      - key: DJANGO_SETTINGS_MODULE
+        value: chatbot_project.settings
