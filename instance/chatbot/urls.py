@@ -15,4 +15,5 @@ urlpatterns = [
     path('set_mode/', views.set_mode, name='set_mode'),
     path('history/', views.search_history, name='search_history'),
     path('debug/database/', views.debug_database, name='debug_database'),
+    path("ping/", views.ping),
 ]

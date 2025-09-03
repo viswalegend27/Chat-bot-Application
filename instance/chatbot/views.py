@@ -14,6 +14,14 @@ from .utils import *
 
 logger = logging.getLogger(__name__)
 
+def ping(request):
+    request.session["ping"] = "pong"
+    return JsonResponse({
+        "ok": True,
+        "session_key": request.session.session_key,
+        "has_ping": "ping" in request.session
+    })
+
 # ------------------ Debugging & Logging ------------------
 
 def debug_database(request):
