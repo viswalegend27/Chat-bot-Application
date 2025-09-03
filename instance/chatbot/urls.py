@@ -14,4 +14,5 @@ urlpatterns = [
     path('clear_documents/', views.clear_documents, name='clear_documents'),
     path('set_mode/', views.set_mode, name='set_mode'),
     path('history/', views.search_history, name='search_history'),
+    path('debug/database/', views.debug_database, name='debug_database'),
 ]
