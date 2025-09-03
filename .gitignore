@@ -26,3 +26,5 @@ instance/
 
 # Don't commit collected static files
 /staticfiles/
+
+render.yaml
