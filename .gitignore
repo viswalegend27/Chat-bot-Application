@@ -23,3 +23,6 @@ instance/
 .vscode/
 .idea/
 *.swp
+
+# Don't commit collected static files
+/staticfiles/
