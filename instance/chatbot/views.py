@@ -77,54 +77,6 @@ def enhanced_login_view(request):
         logger.error(f"Error type: {type(e).__name__}")
         raise
 
-# ------------------ Conversation Helpers ------------------
-
-def get_conversation_history(user_uid, limit=10):
-    """Get recent conversation history for context"""
-    messages = Message.objects.filter(user_uid=user_uid).order_by('-id')[:limit*2]
-    history = []
-    for msg in reversed(messages):
-        if msg.sender == 'user':
-            history.append(f"User: {msg.text}")
-        else:
-            history.append(f"Assistant: {msg.text}")
-    return "\n".join(history)
-
-
-def format_rag_prompt(conversation_history, context, user_message):
-    """Format RAG prompt with conversation history"""
-    return f"""Previous conversation:
-{conversation_history}
-
-Based on the following context, answer the current question:
-
-Context:
-{context}
-
-Current question: {user_message}
-
-Please provide a helpful response based on the context and conversation history."""
-
-
-def format_no_docs_prompt(conversation_history, user_message):
-    """Format prompt when no documents are available"""
-    return f"""Previous conversation:
-{conversation_history}
-
-Current question: {user_message}
-
-I don't have any relevant documents uploaded to answer this question. Please upload some documents first to use Document Q&A mode."""
-
-
-def format_chat_prompt(conversation_history, user_message):
-    """Format general chat prompt with conversation history"""
-    return f"""Previous conversation:
-{conversation_history}
-
-Current question: {user_message}
-
-Please provide a helpful response considering our conversation history."""
-
 # ------------------ Auth Views ------------------
 
 def home(request):
@@ -194,40 +146,31 @@ def chat(request):
             return JsonResponse({'error': 'Empty message'}, status=400)
 
         try:
+            # Get conversation history BEFORE saving the new user message
+            # This ensures the current question isn't included in the history
             conversation_history = get_conversation_history(user_uid)
 
             if mode == 'rag':
+                # RAG Mode - Search for relevant document chunks
                 context_chunks = search_similar(user_message, user_uid)
                 if context_chunks:
+                    # Documents found - use RAG with context and conversation history
                     context = "\n\n".join(context_chunks)
-                    if conversation_history:
-                        prompt = format_rag_prompt(conversation_history, context, user_message)
-                    else:
-                        prompt = f"""Based on the following context, answer the question:
-
-Context:
-{context}
-
-Question: {user_message}
-
-Please provide a helpful response based on the context."""
+                    prompt = format_rag_prompt(conversation_history, context, user_message)
                 else:
-                    if conversation_history:
-                        prompt = format_no_docs_prompt(conversation_history, user_message)
-                    else:
-                        prompt = f"I don't have any relevant documents uploaded to answer this question: {user_message}\n\nPlease upload some documents first to use Document Q&A mode."
+                    # No relevant documents found - inform user but maintain conversation context
+                    prompt = format_no_docs_prompt(conversation_history, user_message)
             else:
-                if conversation_history:
-                    prompt = format_chat_prompt(conversation_history, user_message)
-                else:
-                    prompt = user_message
+                # Chat Mode - General conversation with history context
+                prompt = format_chat_prompt(conversation_history, user_message)
 
-            # Save user message
+            # Save user message to database
             Message.objects.create(user_uid=user_uid, text=user_message, sender='user')
 
+            # Get response from Gemini API
             bot_reply = ask_gemini(prompt)
 
-            # Save bot response
+            # Save bot response to database
             Message.objects.create(user_uid=user_uid, text=bot_reply, sender='bot')
 
             return JsonResponse({'reply': bot_reply})
@@ -236,6 +179,7 @@ Please provide a helpful response based on the context."""
             logger.error(f"Error in chat view: {str(e)}")
             return JsonResponse({'error': 'Internal server error'}, status=500)
 
+    # GET request - render chat page with message history
     messages_list = Message.objects.filter(user_uid=user_uid).order_by('id')
     return render(request, 'chat.html', {
         'chat_messages': messages_list,
@@ -262,22 +206,26 @@ def upload_document(request):
     os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
     filepath = os.path.join(settings.MEDIA_ROOT, file.name)
 
+    # Save uploaded file temporarily
     with open(filepath, 'wb+') as destination:
         for chunk in file.chunks():
             destination.write(chunk)
 
+    # Extract text from the file
     text = extract_text(filepath)
     if not text.strip():
         messages.error(request, 'Could not extract text from the file')
         os.remove(filepath)
         return redirect('chat')
 
+    # Create document record in database
     doc = Document.objects.create(
         user_uid=request.session['user_uid'],
         filename=file.name,
         content=text
     )
 
+    # Create embeddings for text chunks
     chunks = chunk_text(text)
     success_count = 0
     for chunk in chunks:
@@ -289,6 +237,7 @@ def upload_document(request):
                 embedding.save()
                 success_count += 1
 
+    # Clean up temporary file
     os.remove(filepath)
 
     if success_count > 0:
@@ -349,11 +298,13 @@ def search_history(request):
     user_uid = request.session['user_uid']
     messages_qs = Message.objects.filter(user_uid=user_uid).order_by('-id')
 
+    # Group messages into conversations
     conversations = []
     current_conversation = []
 
     for i, msg in enumerate(messages_qs):
         current_conversation.append(msg)
+        # Create a new conversation every 20 messages or at the end
         if len(current_conversation) >= 20 or i == len(messages_qs) - 1:
             if current_conversation:
                 conversations.append(list(reversed(current_conversation)))
