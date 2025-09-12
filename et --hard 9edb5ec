@@ -1,0 +1,35 @@
+[33m790e573[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m Redesign styles
+[33m10e6caf[m Changed styles
+[33m33c73c8[m Changed styles
+[33m19055b2[m Changed styles
+[33m9edb5ec[m Changed views.py and utils.py
+[33m31b9ae9[m Stable deployment
+[33m9b9a27f[m Stable build removed render.yaml
+[33m423e640[m Stable Version removed render.yaml
+[33m6bb0245[m Remove staticfiles from repo
+[33mf9b92af[m Changes urls.py views.py and render.yaml
+[33mcec9f95[m changed-gitignore
+[33m623edbb[m settings.py changed
+[33m6856397[m Changed the settings.py
+[33m14c8028[m Changed the settings.py
+[33m9466d0c[m Reverting urls.py
+[33mf08c272[m Modifying urls.py
+[33m23b79e7[m Build command with migrations
+[33m08619ac[m Deployed commit with issues
+[33m62feded[m Fix start command for Django on Render
+[33m9792b85[m Add Render deployment config
+[33m92926e7[m Add render.yaml for Render deployment and update settings.py
+[33mf431459[m Update settings.py and add requirements for Render deployment
+[33m89659c9[m Move requirements.txt to repo root for Render
+[33mb937528[m Remove staticfiles from tracking and add .gitignore
+[33m3683c59[m After migration
+[33m91f55e0[m Update .gitignore to ignore sensitive files
+[33m979f04d[m Update .gitignore to ignore sensitive files
+[33m8c66abc[m Latest commit
+[33mea6a948[m After Complete modification
+[33mea466e3[m After re-locating styles
+[33m5b2baaf[m Making clear documents functions
+[33mac6f3ac[m After creating some additional functionalities
+[33mf55678e[m 2 commit
+[33m99bba3b[m first commit
+[33m5ef108a[m first commit
