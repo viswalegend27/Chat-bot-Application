@@ -8,13 +8,26 @@ from django.views.decorators.http import require_http_methods
 from django.conf import settings
 from django.db import connection
 from django.contrib.sessions.models import Session
-
+import speech_recognition as sr
+from pydub import AudioSegment
+import tempfile
+import speech_recognition as sr
+from pydub import AudioSegment
+from pydub.utils import which
 from .models import Message, Document, Embedding
 from .utils import *
 
 logger = logging.getLogger(__name__)
 
 def ping(request):
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body.decode("utf-8"))
+            transcript = data.get("transcript")
+            if transcript:
+                print(f"🎤 Transcript received: {transcript}")  # ✅ Appears in Django terminal
+        except Exception as e:
+            print(f"⚠️ Error parsing transcript: {e}")
     request.session["ping"] = "pong"
     return JsonResponse({
         "ok": True,
@@ -332,3 +345,104 @@ def set_mode(request):
         if mode in ['chat', 'rag']:
             request.session['mode'] = mode
     return redirect('chat')
+
+# ------------------ SpeechRecognition Views ------------------
+
+logger = logging.getLogger(__name__)
+
+@csrf_exempt
+def speech_to_text(request):
+    """
+    Accept uploaded audio (webm/ogg/mp4) -> convert to WAV using pydub/ffmpeg ->
+    transcribe with speech_recognition (Google Web Speech) and return JSON.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+
+    if "audio" not in request.FILES:
+        logger.warning("No audio file in request")
+        return JsonResponse({"error": "No audio uploaded"}, status=400)
+
+    audio_file = request.FILES["audio"]
+    logger.info(f"Received audio upload: name={audio_file.name}, size={audio_file.size}")
+
+    # Ensure pydub can find ffmpeg. If ffmpeg is not on PATH, set path manually below.
+    ffmpeg_path = which("ffmpeg")
+    if ffmpeg_path is None:
+        logger.warning("ffmpeg not found on PATH. pydub may fail to convert audio.")
+        # Optionally set AudioSegment.converter to a specific location:
+        # AudioSegment.converter = r"C:\path\to\ffmpeg.exe"
+    else:
+        AudioSegment.converter = ffmpeg_path
+        logger.info(f"ffmpeg path set to: {ffmpeg_path}")
+
+    # Save uploaded file to a temp file
+    in_tmp_path = None
+    out_tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(audio_file.name)[1]) as in_tmp:
+            for chunk in audio_file.chunks():
+                in_tmp.write(chunk)
+            in_tmp_path = in_tmp.name
+        logger.info(f"Saved uploaded audio to temp: {in_tmp_path}")
+
+        # Convert to WAV using pydub (requires ffmpeg)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as out_tmp:
+            out_tmp_path = out_tmp.name
+
+        try:
+            logger.info("Attempting to convert uploaded audio to WAV with pydub...")
+            audio_seg = AudioSegment.from_file(in_tmp_path)
+            audio_seg = audio_seg.set_channels(1)       # mono
+            audio_seg = audio_seg.set_frame_rate(16000) # 16kHz
+            audio_seg.export(out_tmp_path, format="wav")
+            logger.info(f"Exported WAV to {out_tmp_path}")
+        except Exception as conv_err:
+            logger.exception("Conversion error with pydub/ffmpeg")
+            # cleanup
+            if in_tmp_path and os.path.exists(in_tmp_path):
+                os.remove(in_tmp_path)
+            if out_tmp_path and os.path.exists(out_tmp_path):
+                os.remove(out_tmp_path)
+            return JsonResponse({"error": f"Audio conversion failed: {conv_err}"}, status=500)
+
+        # Transcribe with speech_recognition
+        recognizer = sr.Recognizer()
+        try:
+            with sr.AudioFile(out_tmp_path) as source:
+                audio_data = recognizer.record(source)
+
+            logger.info("Calling recognizer.recognize_google()")
+            transcript = recognizer.recognize_google(audio_data)
+            logger.info(f"Transcription success: {transcript}")
+
+            # clean up temp files
+            if os.path.exists(in_tmp_path):
+                os.remove(in_tmp_path)
+            if os.path.exists(out_tmp_path):
+                os.remove(out_tmp_path)
+
+            return JsonResponse({"text": transcript})
+        except sr.UnknownValueError:
+            logger.warning("SpeechRecognition could not understand audio")
+            if os.path.exists(in_tmp_path): os.remove(in_tmp_path)
+            if os.path.exists(out_tmp_path): os.remove(out_tmp_path)
+            return JsonResponse({"text": "Could not understand audio"}, status=400)
+        except sr.RequestError as e:
+            logger.exception("SpeechRecognition request error")
+            if os.path.exists(in_tmp_path): os.remove(in_tmp_path)
+            if os.path.exists(out_tmp_path): os.remove(out_tmp_path)
+            return JsonResponse({"error": f"Recognition service error: {e}"}, status=500)
+        except Exception as e:
+            logger.exception("Unexpected error during recognition")
+            if os.path.exists(in_tmp_path): os.remove(in_tmp_path)
+            if os.path.exists(out_tmp_path): os.remove(out_tmp_path)
+            return JsonResponse({"error": f"Recognition failed: {e}"}, status=500)
+
+    except Exception as e:
+        logger.exception("Error handling uploaded file")
+        if in_tmp_path and os.path.exists(in_tmp_path):
+            os.remove(in_tmp_path)
+        if out_tmp_path and os.path.exists(out_tmp_path):
+            os.remove(out_tmp_path)
+        return JsonResponse({"error": f"Server error: {e}"}, status=500)

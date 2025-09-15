@@ -545,3 +545,229 @@ function permanentDeleteAll() {
         }
     }
 }
+
+// 🎤 Speech-to-Text with Debug Logs
+const micButton = document.getElementById("micButton");
+const messageInput = document.getElementById("messageInput");
+const audioPreview = document.getElementById("audioPreview");
+const csrfToken = document.getElementById("csrf-token").value;
+
+let audioContext, mediaStream, sourceNode, processorNode;
+let recordedBuffers = [];
+let recording = false;
+const TARGET_SAMPLE_RATE = 16000; // server expects 16k
+
+function interleaveAndDownsample(buffers, inputSampleRate, outSampleRate) {
+  // merge Float32 arrays
+    let length = buffers.reduce((sum, b) => sum + b.length, 0);
+    let merged = new Float32Array(length);
+    let offset = 0;
+    for (const b of buffers) {
+        merged.set(b, offset);
+        offset += b.length;
+    }
+    if (inputSampleRate === outSampleRate) {
+        return merged;
+    }
+    const ratio = inputSampleRate / outSampleRate;
+    const outLength = Math.round(merged.length / ratio);
+    const out = new Float32Array(outLength);
+    let pos = 0;
+    for (let i = 0; i < outLength; i++) {
+        out[i] = merged[Math.floor(i * ratio)];
+    }
+    return out;
+    }
+
+    function floatTo16BitPCM(float32Array) {
+    const l = float32Array.length;
+    const buffer = new ArrayBuffer(l * 2);
+    const view = new DataView(buffer);
+    let offset = 0;
+    for (let i = 0; i < l; i++, offset += 2) {
+        let s = Math.max(-1, Math.min(1, float32Array[i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
+    return view;
+    }
+
+    function encodeWAV(float32Array, sampleRate) {
+    const bytesPerSample = 2;
+    const blockAlign = bytesPerSample * 1; // mono
+    const bufferLength = 44 + float32Array.length * bytesPerSample;
+    const buffer = new ArrayBuffer(bufferLength);
+    const view = new DataView(buffer);
+
+    /* RIFF identifier */
+    writeString(view, 0, 'RIFF');
+    /* file length */
+    view.setUint32(4, 36 + float32Array.length * bytesPerSample, true);
+    /* RIFF type */
+    writeString(view, 8, 'WAVE');
+    /* format chunk identifier */
+    writeString(view, 12, 'fmt ');
+    /* format chunk length */
+    view.setUint32(16, 16, true);
+    /* sample format (raw) */
+    view.setUint16(20, 1, true);
+    /* channel count */
+    view.setUint16(22, 1, true); // mono
+    /* sample rate */
+    view.setUint32(24, sampleRate, true);
+    /* byte rate (sampleRate * blockAlign) */
+    view.setUint32(28, sampleRate * blockAlign, true);
+    /* block align (channel count * bytes per sample) */
+    view.setUint16(32, blockAlign, true);
+    /* bits per sample */
+    view.setUint16(34, bytesPerSample * 8, true);
+    /* data chunk identifier */
+    writeString(view, 36, 'data');
+    /* data chunk length */
+    view.setUint32(40, float32Array.length * bytesPerSample, true);
+
+    // PCM samples
+    const pcmView = floatTo16BitPCM(float32Array);
+    // copy PCM bytes after header
+    const headerBytes = 44;
+    for (let i = 0; i < pcmView.byteLength; i++) {
+        view.setUint8(headerBytes + i, pcmView.getUint8(i));
+    }
+
+    return new Blob([view], { type: 'audio/wav' });
+    }
+
+    function writeString(view, offset, string) {
+    for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+    }
+    }
+
+    async function startRecording() {
+    console.log("🎙️ startRecording()");
+    recordedBuffers = [];
+
+    // init audio context
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const inputSampleRate = audioContext.sampleRate;
+    console.log("AudioContext sample rate:", inputSampleRate);
+
+    try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+        console.error("Microphone access denied:", err);
+        alert("Microphone access is required.");
+        return;
+    }
+
+    sourceNode = audioContext.createMediaStreamSource(mediaStream);
+
+    // Use ScriptProcessorNode if AudioWorklet not available (simple cross-browser)
+    const bufferSize = 4096;
+    processorNode = audioContext.createScriptProcessor(bufferSize, 1, 1);
+
+    processorNode.onaudioprocess = (e) => {
+        const inputBuffer = e.inputBuffer.getChannelData(0);
+        // copy Float32Array
+        recordedBuffers.push(new Float32Array(inputBuffer));
+        // debug log occasionally
+        if (recordedBuffers.length % 25 === 0) {
+        console.log("🔴 recorded chunks:", recordedBuffers.length);
+        }
+    };
+
+    sourceNode.connect(processorNode);
+    processorNode.connect(audioContext.destination); // necessary on some browsers
+
+    recording = true;
+    micButton.innerText = "⏺️ Recording...";
+    micButton.classList.add("btn-danger");
+    console.log("Recording started");
+    }
+
+    async function stopRecordingAndUpload() {
+    console.log("🛑 stopRecordingAndUpload()");
+    if (!recording) return;
+
+    // stop nodes and tracks
+    try {
+        processorNode.disconnect();
+        sourceNode.disconnect();
+        mediaStream.getTracks().forEach(t => t.stop());
+        audioContext.close();
+    } catch (err) {
+        console.warn("Error stopping audio nodes:", err);
+    }
+
+    recording = false;
+    micButton.innerText = "🎤";
+    micButton.classList.remove("btn-danger");
+
+    // Downsample & merge
+    const inputSampleRate = (audioContext && audioContext.sampleRate) || 48000;
+    const downsampled = interleaveAndDownsample(recordedBuffers, inputSampleRate, TARGET_SAMPLE_RATE);
+    console.log("Merged frames length:", downsampled.length);
+
+    // create WAV blob
+    const wavBlob = encodeWAV(downsampled, TARGET_SAMPLE_RATE);
+    console.log("🧾 WAV blob created:", wavBlob, "size:", wavBlob.size);
+
+    // preview
+    audioPreview.src = URL.createObjectURL(wavBlob);
+    audioPreview.hidden = false;
+    audioPreview.play().catch(() => {});
+
+    // upload
+    const form = new FormData();
+    form.append("audio", wavBlob, "recording.wav");
+
+    try {
+        console.log("📤 Uploading WAV to /speech-to-text/");
+        const res = await fetch("/speech-to-text/", {
+        method: "POST",
+        headers: { "X-CSRFToken": csrfToken },
+        body: form
+        });
+        const data = await res.json();
+        console.log("📥 Server response:", res.status, data);
+        if (res.ok && data.text) {
+        messageInput.value = data.text;
+        console.log("✅ Transcribed text inserted into input.");
+        } else {
+        console.error("❌ Transcription failed:", data);
+        alert("Transcription failed: " + (data.error || data.text || "unknown"));
+        }
+    } catch (err) {
+        console.error("❌ Upload/transcription error:", err);
+        alert("Upload/transcription error. See console for details.");
+    }
+    }
+
+    // wire up button to toggle
+    micButton.addEventListener("click", async () => {
+    console.log("🎤 Mic button clicked. recording?", recording);
+    if (!recording) {
+        await startRecording();
+        // stop automatically after 8s if you want:
+        // setTimeout(() => { if (recording) stopRecordingAndUpload(); }, 8000);
+    } else {
+        await stopRecordingAndUpload();
+    }
+});
+
+function setRecordingState(on) {
+    if (on) {
+        micButton.classList.add('recording');
+        // if you prefer Bootstrap naming: micButton.classList.add('btn-danger');
+    } else {
+        micButton.classList.remove('recording');
+        micButton.classList.remove('btn-danger');
+    }
+}
+
+// Example usage in your recorder lifecycle:
+recognition.onstart = () => { setRecordingState(true); /* other stuff */ };
+recognition.onend   = () => { setRecordingState(false); /* other stuff */ };
+// OR for MediaRecorder approach
+mediaRecorder.onstart = () => setRecordingState(true);
+mediaRecorder.onstop  = () => setRecordingState(false);
+

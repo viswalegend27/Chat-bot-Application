@@ -16,4 +16,5 @@ urlpatterns = [
     path('history/', views.search_history, name='search_history'),
     path('debug/database/', views.debug_database, name='debug_database'),
     path("ping/", views.ping),
+    path("speech-to-text/", views.speech_to_text, name="speech_to_text"),
 ]
