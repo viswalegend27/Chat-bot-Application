@@ -385,7 +385,7 @@ def speech_to_text(request):
                 in_tmp.write(chunk)
             in_tmp_path = in_tmp.name
         logger.info(f"Saved uploaded audio to temp: {in_tmp_path}")
-
+        
         # Convert to WAV using pydub (requires ffmpeg)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as out_tmp:
             out_tmp_path = out_tmp.name
@@ -395,8 +395,8 @@ def speech_to_text(request):
             audio_seg = AudioSegment.from_file(in_tmp_path)
             audio_seg = audio_seg.set_channels(1)       # mono
             audio_seg = audio_seg.set_frame_rate(16000) # 16kHz
-            audio_seg.export(out_tmp_path, format="wav")
-            logger.info(f"Exported WAV to {out_tmp_path}")
+            audio_seg.export(out_tmp_path, format="wav") 
+            logger.info(f"Exported WAV to {out_tmp_path}") 
         except Exception as conv_err:
             logger.exception("Conversion error with pydub/ffmpeg")
             # cleanup
@@ -446,3 +446,4 @@ def speech_to_text(request):
         if out_tmp_path and os.path.exists(out_tmp_path):
             os.remove(out_tmp_path)
         return JsonResponse({"error": f"Server error: {e}"}, status=500)
+    

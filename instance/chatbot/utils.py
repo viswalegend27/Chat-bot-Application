@@ -302,6 +302,8 @@ def search_similar(query, user_uid, threshold=0.1):
                     continue
                 
                 # Calculate cosine similarity
+                #  qe numerical representation of the search query 
+                # vector is the numerical representation of a document chunk that the code is comparing the query against.
                 similarity = np.dot(query_embedding, vector) / (query_norm * vector_norm)
                 
                 # Only include chunks above threshold

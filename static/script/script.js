@@ -642,6 +642,7 @@ function interleaveAndDownsample(buffers, inputSampleRate, outSampleRate) {
     }
     }
 
+    //Function to start record 
     async function startRecording() {
     console.log("🎙️ startRecording()");
     recordedBuffers = [];

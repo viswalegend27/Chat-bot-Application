@@ -20,9 +20,3 @@ class Embedding(models.Model):
     document = models.ForeignKey(Document, on_delete=models.CASCADE)
     chunk = models.TextField()
     vector_data = models.BinaryField()
-    
-    def set_vector(self, vector):
-        self.vector_data = pickle.dumps(vector)
-    
-    def get_vector(self):
-        return pickle.loads(self.vector_data) if self.vector_data else None
